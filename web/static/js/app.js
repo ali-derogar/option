@@ -728,9 +728,9 @@ function renderFourStepConclusion(rows) {
                   <strong>${conclusion.finalLabel}</strong>
                 </div>
                 <div class="analysis-step-grid">
-                  ${conclusion.steps
-                    .map(
-	                      (step, index) => `
+	                  ${conclusion.steps
+	                    .map(
+	                      (step) => `
 	                        <article class="analysis-step analysis-step-${step.className}">
 	                          <div class="analysis-step-title">
 	                            <span>${escapeHtml(step.kicker)}</span>
@@ -750,12 +750,12 @@ function renderFourStepConclusion(rows) {
                               : `<div class="analysis-step-label">${escapeHtml(step.label)}</div>`}
 	                          <div class="analysis-step-metrics">
 	                            ${step.metrics
-	                              .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(typeof value === "number" ? fmtNum(value) : value)}</strong></div>`)
-	                              .join("")}
+                                .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(typeof value === "number" ? fmtNum(value) : value)}</strong></div>`)
+                                .join("")}
 	                          </div>
-                        </article>`
-                    )
-                    .join("")}
+	                        </article>`
+	                    )
+	                    .join("")}
                 </div>
               </section>`
           )
