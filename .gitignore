@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/*.db
+data/exports/
+.streamlit/
+*.egg-info/
+dist/
+build/
+.refact
