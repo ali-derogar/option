@@ -24,6 +24,11 @@
         </div>
       </div>
       <div class="header-actions">
+        <label class="date-filter">
+          <span>تاریخ</span>
+          <input type="date" id="dateFilter" aria-label="انتخاب تاریخ" list="availableDates" />
+          <datalist id="availableDates"></datalist>
+        </label>
         <span class="last-update" id="lastUpdate">—</span>
         <button type="button" class="btn btn-ghost" id="btnExport" title="خروجی CSV">
           <span>دانلود CSV</span>

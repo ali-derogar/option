@@ -3,10 +3,13 @@
  */
 
 const underlyingMatch = window.location.pathname.match(/^\/underlying\/(.+)$/);
+const initialParams = new URLSearchParams(window.location.search);
 
 const state = {
   view: underlyingMatch ? "underlying" : "underlyings",
   underlyingKey: underlyingMatch ? decodeURIComponent(underlyingMatch[1]) : null,
+  selectedDate: initialParams.get("date") || "",
+  availableDates: [],
   items: [],
   filtered: [],
   sortKey: null,
@@ -16,6 +19,7 @@ const state = {
   oiChart: null,
   underlying: null,
   analysisVisible: false,
+  trendRequestId: 0,
   filters: {
     type: "all",
     expiry: "all",
@@ -180,6 +184,27 @@ function setStatusText(text) {
   if (text) document.getElementById("lastUpdate").textContent = text;
 }
 
+function dateQuery(prefix = "?") {
+  return state.selectedDate ? `${prefix}date=${encodeURIComponent(state.selectedDate)}` : "";
+}
+
+function appendQuery(params) {
+  const query = new URLSearchParams();
+  if (state.selectedDate) query.set("date", state.selectedDate);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  const s = query.toString();
+  return s ? `?${s}` : "";
+}
+
+function syncDateToUrl() {
+  const url = new URL(window.location.href);
+  if (state.selectedDate) url.searchParams.set("date", state.selectedDate);
+  else url.searchParams.delete("date");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+}
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -193,15 +218,32 @@ async function api(path, options = {}) {
 }
 
 async function loadSummary() {
-  const s = await api("/api/summary");
+  const s = await api(`/api/summary${dateQuery()}`);
   document.getElementById("statContracts").textContent = fmtNum(s.underlying_count);
   document.getElementById("statBuyOi").textContent = fmtNum(s.contract_count);
   document.getElementById("statSellOi").textContent = fmtNum(s.call_count);
   document.getElementById("statNaturalFlow").textContent = fmtNum(s.put_count);
   document.getElementById("statLegalFlow").textContent = fmtNum(s.total_trade_volume);
   document.getElementById("lastUpdate").textContent = s.last_update
-    ? `آخرین بروزرسانی: ${fmtDate(s.last_update)}`
+    ? `تاریخ داده: ${state.selectedDate ? fmtDate(state.selectedDate) : "آخرین"} · بروزرسانی: ${fmtDate(s.last_update)}`
     : "بدون داده";
+}
+
+async function loadDates() {
+  const input = document.getElementById("dateFilter");
+  const options = document.getElementById("availableDates");
+  const data = await api("/api/dates");
+  state.availableDates = data.items || [];
+  if (!state.selectedDate && data.latest) {
+    state.selectedDate = data.latest;
+  }
+  options.innerHTML = state.availableDates.length
+    ? state.availableDates
+        .map((date) => `<option value="${escapeHtml(date)}">${escapeHtml(fmtDate(date))}</option>`)
+        .join("")
+    : "";
+  input.value = state.selectedDate || "";
+  syncDateToUrl();
 }
 
 function currentSearch() {
@@ -209,14 +251,14 @@ function currentSearch() {
 }
 
 async function loadUnderlyings(search = "") {
-  const q = search ? `?q=${encodeURIComponent(search)}` : "";
+  const q = appendQuery({ q: search });
   const data = await api(`/api/underlyings${q}`);
   state.items = data.items || [];
   applyFilterAndSort();
 }
 
 async function loadUnderlyingContracts(search = "") {
-  const q = search ? `?q=${encodeURIComponent(search)}` : "";
+  const q = appendQuery({ q: search });
   const data = await api(`/api/underlyings/${encodeURIComponent(state.underlyingKey)}/contracts${q}`);
   state.items = data.items || [];
   state.underlying = data.underlying || null;
@@ -362,7 +404,8 @@ function selectRowByIndex(index) {
   if (!row) return;
 
   if (state.view === "underlyings") {
-    window.open(`/underlying/${encodeURIComponent(row.underlying_key)}`, "_blank", "noopener");
+    const q = dateQuery();
+    window.open(`/underlying/${encodeURIComponent(row.underlying_key)}${q}`, "_blank", "noopener");
     return;
   }
 
@@ -427,7 +470,7 @@ function formatDetailValue(key, val) {
 async function loadOiChart(insCode) {
   const block = document.getElementById("chartBlock");
   try {
-    const data = await api(`/api/open-interest/${insCode}`);
+    const data = await api(`/api/open-interest/${insCode}${dateQuery()}`);
     const history = data.history || [];
     if (!history.length) {
       block.classList.add("hidden");
@@ -581,6 +624,11 @@ function ratioLabel(num, den) {
   return (num / den).toLocaleString("fa-IR", { maximumFractionDigits: 2 });
 }
 
+function analysisMetricValue(value) {
+  if (value == null) return "—";
+  return typeof value === "number" ? fmtNum(value) : value;
+}
+
 function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
   const callRows = rows.filter((row) => row.option_type === "call");
   const putRows = rows.filter((row) => row.option_type === "put");
@@ -595,9 +643,12 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
   const otmVolume = sumRows(otmRows, (row) => rowParticipantVolume(row, prefix));
   const callVolume = sumRows(callRows, (row) => rowParticipantVolume(row, prefix));
   const putVolume = sumRows(putRows, (row) => rowParticipantVolume(row, prefix));
-  const currentOi = sumRows(rows, (row) => row.buy_open_positions);
-  const yesterdayOi = sumRows(rows, (row) => row.yesterday_open_positions);
-  const oiChange = currentOi - yesterdayOi;
+  const hasCurrentOi = rows.some((row) => row.buy_open_positions != null);
+  const hasYesterdayOi = rows.some((row) => row.yesterday_open_positions != null);
+  const hasOi = hasCurrentOi || hasYesterdayOi;
+  const currentOi = hasCurrentOi ? sumRows(rows, (row) => row.buy_open_positions) : null;
+  const yesterdayOi = hasYesterdayOi ? sumRows(rows, (row) => row.yesterday_open_positions) : null;
+  const oiChange = hasOi ? numericValue(currentOi) - numericValue(yesterdayOi) : null;
 
   const callBuyDominates = callBuy > callSell;
   const callSellDominates = callSell > callBuy;
@@ -609,8 +660,8 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
   const step2Strong = otmVolume > itmVolume;
   const step2Cautious = itmVolume > otmVolume;
   const step3Bullish = callVolume > putVolume;
-  const step4Confirm = oiChange > 0;
-  const step4Weak = oiChange < 0;
+  const step4Confirm = oiChange != null && oiChange > 0;
+  const step4Weak = oiChange != null && oiChange < 0;
 
   const score =
     step1Score +
@@ -695,7 +746,7 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
       {
         kicker: "تأیید موقعیت",
         title: "Open Interest",
-        label: step4Confirm ? "تأییدکننده" : step4Weak ? "تضعیف‌کننده" : "بدون تغییر",
+        label: !hasOi ? "داده موجود نیست" : step4Confirm ? "تأییدکننده" : step4Weak ? "تضعیف‌کننده" : "بدون تغییر",
         className: step4Confirm ? "bullish" : step4Weak ? "weak" : "neutral",
         metrics: [
           ["OI کل امروز", currentOi],
@@ -750,7 +801,7 @@ function renderFourStepConclusion(rows) {
                               : `<div class="analysis-step-label">${escapeHtml(step.label)}</div>`}
 	                          <div class="analysis-step-metrics">
 	                            ${step.metrics
-                                .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(typeof value === "number" ? fmtNum(value) : value)}</strong></div>`)
+                                .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(analysisMetricValue(value))}</strong></div>`)
                                 .join("")}
 	                          </div>
 	                        </article>`
@@ -762,6 +813,122 @@ function renderFourStepConclusion(rows) {
           .join("")}
       </div>
     </section>`;
+}
+
+function renderTrendShell() {
+  return `
+    <section class="analysis-conclusion trend-analysis" id="trendAnalysis">
+      <div class="analysis-conclusion-head">
+        <span>روند ۷ روزه تحلیل</span>
+        <strong>در حال بارگذاری...</strong>
+      </div>
+      <div class="trend-loading">در حال آماده‌سازی روند تاریخی</div>
+    </section>`;
+}
+
+async function loadTrendAnalysis() {
+  const container = document.getElementById("trendAnalysis");
+  if (!container || state.view !== "underlying" || !state.analysisVisible || !state.underlyingKey) return;
+  const requestId = ++state.trendRequestId;
+  try {
+    const query = appendQuery({ days: "7" });
+    const data = await api(`/api/underlyings/${encodeURIComponent(state.underlyingKey)}/trend${query}`);
+    if (requestId !== state.trendRequestId) return;
+    container.outerHTML = renderTrendAnalysis(data);
+  } catch (e) {
+    if (requestId !== state.trendRequestId) return;
+    container.outerHTML = `
+      <section class="analysis-conclusion trend-analysis">
+        <div class="analysis-conclusion-head">
+          <span>روند ۷ روزه تحلیل</span>
+          <strong>خطا در دریافت داده</strong>
+        </div>
+        <div class="trend-loading">امکان ساخت روند تاریخی برای این تاریخ وجود ندارد</div>
+      </section>`;
+  }
+}
+
+function renderTrendAnalysis(data) {
+  const items = data.items || [];
+  if (!items.length) {
+    return `
+      <section class="analysis-conclusion trend-analysis">
+        <div class="analysis-conclusion-head">
+          <span>روند ۷ روزه تحلیل</span>
+          <strong>داده کافی نیست</strong>
+        </div>
+        <div class="trend-loading">برای این سهم در بازه انتخابی داده تاریخی کافی پیدا نشد</div>
+      </section>`;
+  }
+  return `
+    <section class="analysis-conclusion trend-analysis">
+      <div class="analysis-conclusion-head">
+        <span>روند ۷ روزه تحلیل</span>
+        <strong>${fmtNum(items.length)} روز معاملاتی</strong>
+      </div>
+      <div class="trend-summary-grid">
+        ${renderTrendSummary("حقیقی", data.summary?.natural, "analysis-person-natural")}
+        ${renderTrendSummary("حقوقی", data.summary?.legal, "analysis-person-legal")}
+      </div>
+      <div class="trend-tables">
+        ${renderTrendPersonTable("حقیقی", "natural", items, "analysis-person-natural")}
+        ${renderTrendPersonTable("حقوقی", "legal", items, "analysis-person-legal")}
+      </div>
+    </section>`;
+}
+
+function renderTrendSummary(label, summary, cls) {
+  const className = summary?.class_name || "neutral";
+  return `
+    <article class="trend-summary-card trend-${className}">
+      <span class="${cls}">${escapeHtml(label)}</span>
+      <strong>${escapeHtml(summary?.label || "داده کافی نیست")}</strong>
+      <small>میانگین اخیر: ${summary?.average_score == null ? "—" : fmtRatio(summary.average_score)}</small>
+    </article>`;
+}
+
+function renderTrendPersonTable(label, key, items, cls) {
+  return `
+    <section class="trend-person">
+      <div class="trend-person-title">
+        <span class="${cls}">${escapeHtml(label)}</span>
+        <strong>اعداد روزانه</strong>
+      </div>
+      <div class="trend-table-wrap">
+        <table class="trend-table">
+          <thead>
+            <tr>
+              <th>تاریخ</th>
+              <th>نتیجه</th>
+              <th>Call خ/ف</th>
+              <th>Put خ/ف</th>
+              <th>ITM/OTM</th>
+              <th>Call/Put</th>
+              <th>تغییر OI</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((item) => renderTrendRow(item, key)).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
+function renderTrendRow(item, key) {
+  const person = item.people?.[key] || {};
+  const className = person.class_name || "neutral";
+  const oi = person.has_open_interest ? fmtNum(person.open_interest_change) : "—";
+  return `
+    <tr>
+      <td>${escapeHtml(fmtDate(item.date))}</td>
+      <td><span class="trend-badge trend-${className}">${escapeHtml(person.label || "—")}</span></td>
+      <td>${fmtNum(person.call_buy)} / ${fmtNum(person.call_sell)}</td>
+      <td>${fmtNum(person.put_buy)} / ${fmtNum(person.put_sell)}</td>
+      <td>${fmtNum(person.itm_volume)} / ${fmtNum(person.otm_volume)}</td>
+      <td>${person.call_put_ratio == null ? "—" : fmtRatio(person.call_put_ratio)}</td>
+      <td>${escapeHtml(oi)}</td>
+    </tr>`;
 }
 
 function renderAnalysisSideSummary(typeModel) {
@@ -955,11 +1122,12 @@ function renderAnalysis() {
   const model = buildAnalysisModel(rows);
   const underlyingName = state.underlying?.underlying_symbol || state.underlying?.underlying_short_name || "";
   document.getElementById("analysisTitle").textContent = underlyingName
-    ? `آنالیز حقیقی / حقوقی ${underlyingName}`
+    ? `آنالیز حقیقی / حقوقی ${underlyingName}${state.selectedDate ? ` - ${fmtDate(state.selectedDate)}` : ""}`
     : "آنالیز حقیقی / حقوقی";
   document.getElementById("analysisScope").textContent = `${fmtNum(rows.length)} قرارداد ITM/OTM`;
-  content.innerHTML = renderFourStepConclusion(rows) + renderAnalysisSide("call", "خرید", model) + renderAnalysisSide("put", "فروش", model);
+  content.innerHTML = renderFourStepConclusion(rows) + renderTrendShell() + renderAnalysisSide("call", "خرید", model) + renderAnalysisSide("put", "فروش", model);
   panel.classList.remove("hidden");
+  loadTrendAnalysis();
 }
 
 function exportCsv() {
@@ -1047,6 +1215,30 @@ function bindSearch() {
 }
 
 function bindFilters() {
+  document.getElementById("dateFilter").addEventListener("change", async (event) => {
+    state.selectedDate = event.target.value;
+    state.selectedRowKey = null;
+    state.selectedInsCode = null;
+    state.underlying = null;
+    syncDateToUrl();
+    renderDetail(null);
+    setStatusText("در حال دریافت داده تاریخ انتخابی...");
+    setLoading(true);
+    try {
+      await loadSummary();
+      await reloadActiveData();
+      await loadDates();
+      if (state.view === "underlying" && state.items.length) {
+        selectRowByIndex(0);
+      }
+    } catch (e) {
+      showToast("خطا در تغییر تاریخ", "error");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  });
+
   document.getElementById("btnAnalysis").addEventListener("click", () => {
     state.analysisVisible = !state.analysisVisible;
     updateViewChrome();
@@ -1087,6 +1279,7 @@ async function init() {
   setLoading(true);
   try {
     updateViewChrome();
+    await loadDates();
     await loadSummary();
     await reloadActiveData();
     if (state.view === "underlying" && state.items.length && !state.selectedRowKey) {
@@ -1103,7 +1296,7 @@ async function init() {
 document.getElementById("btnRefresh").addEventListener("click", startRefresh);
 document.getElementById("btnExport").addEventListener("click", exportCsv);
 document.getElementById("btnBack").addEventListener("click", () => {
-  window.location.href = "/";
+  window.location.href = `/${dateQuery()}`;
 });
 document.getElementById("closeDetail").addEventListener("click", () => {
   state.selectedInsCode = null;

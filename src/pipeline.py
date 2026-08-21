@@ -78,6 +78,7 @@ def _store_public_option_fallback(
     ]
 
     storage.upsert_contracts(contracts)
+    storage.insert_contract_snapshot(contracts)
     storage.insert_open_interest(open_interest_rows)
     progress(
         stage="contracts_stored",
@@ -242,6 +243,7 @@ def run_pipeline(
         )
 
     storage.upsert_contracts(enriched_contracts)
+    storage.insert_contract_snapshot(enriched_contracts)
     storage.insert_open_interest(open_interest_rows)
     logger.info("Stored %d contracts and open interest snapshots", len(enriched_contracts))
     progress(

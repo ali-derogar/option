@@ -35,11 +35,16 @@ def _df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     ]
 
 
-def get_merged_contracts(storage: Storage) -> pd.DataFrame:
-    contracts = storage.get_contracts_df()
+def get_available_dates(storage: Storage) -> Dict[str, Any]:
+    dates = storage.get_available_snapshot_dates()
+    return {"items": dates, "latest": dates[0] if dates else None, "total": len(dates)}
+
+
+def get_merged_contracts(storage: Storage, snapshot_date: Optional[str] = None) -> pd.DataFrame:
+    contracts = storage.get_contracts_df(snapshot_date=snapshot_date)
     if contracts.empty:
         return contracts
-    client_type = storage.get_latest_client_type_df()
+    client_type = storage.get_latest_client_type_df(snapshot_date=snapshot_date)
     if client_type.empty:
         return contracts
     ct_cols = list(client_type.columns)
@@ -129,8 +134,12 @@ def _first_present(series: pd.Series) -> Any:
     return None
 
 
-def get_underlyings(storage: Storage, q: Optional[str] = None) -> Dict[str, Any]:
-    merged = get_merged_contracts(storage)
+def get_underlyings(
+    storage: Storage,
+    q: Optional[str] = None,
+    snapshot_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    merged = get_merged_contracts(storage, snapshot_date=snapshot_date)
     if merged.empty:
         return {"items": [], "total": 0}
 
@@ -175,8 +184,13 @@ def get_underlyings(storage: Storage, q: Optional[str] = None) -> Dict[str, Any]
     return {"items": items, "total": len(items)}
 
 
-def get_underlying_contracts(storage: Storage, underlying_key: str, q: Optional[str] = None) -> Dict[str, Any]:
-    merged = get_merged_contracts(storage)
+def get_underlying_contracts(
+    storage: Storage,
+    underlying_key: str,
+    q: Optional[str] = None,
+    snapshot_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    merged = get_merged_contracts(storage, snapshot_date=snapshot_date)
     if merged.empty:
         return {"items": [], "total": 0, "underlying": None}
 
@@ -202,9 +216,9 @@ def get_underlying_contracts(storage: Storage, underlying_key: str, q: Optional[
     return {"items": _df_to_records(df), "total": len(df), "underlying": underlying}
 
 
-def get_summary(storage: Storage) -> Dict[str, Any]:
-    merged = get_merged_contracts(storage)
-    contracts = storage.get_contracts_df()
+def get_summary(storage: Storage, snapshot_date: Optional[str] = None) -> Dict[str, Any]:
+    merged = get_merged_contracts(storage, snapshot_date=snapshot_date)
+    contracts = storage.get_contracts_df(snapshot_date=snapshot_date)
     last_update = None
     if not contracts.empty and "updated_at" in contracts.columns:
         last_update = contracts["updated_at"].max()
@@ -246,8 +260,12 @@ def get_summary(storage: Storage) -> Dict[str, Any]:
     return summary
 
 
-def get_sentiment(storage: Storage, q: Optional[str] = None) -> Dict[str, Any]:
-    merged = get_merged_contracts(storage)
+def get_sentiment(
+    storage: Storage,
+    q: Optional[str] = None,
+    snapshot_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    merged = get_merged_contracts(storage, snapshot_date=snapshot_date)
     result = analyze_options_sentiment(merged)
     items = result["items"]
     if q:
@@ -264,3 +282,161 @@ def get_sentiment(storage: Storage, q: Optional[str] = None) -> Dict[str, Any]:
         "total": len(items),
         "summary": result["summary"],
     }
+
+
+def get_underlying_trend(
+    storage: Storage,
+    underlying_key: str,
+    dates: List[str],
+) -> Dict[str, Any]:
+    daily_items: List[Dict[str, Any]] = []
+    for snapshot_date in dates:
+        contracts = get_underlying_contracts(
+            storage,
+            underlying_key=underlying_key,
+            snapshot_date=snapshot_date,
+        )
+        rows = contracts.get("items", [])
+        if not rows:
+            continue
+        daily_items.append(
+            {
+                "date": snapshot_date,
+                "contract_count": len(rows),
+                "underlying": contracts.get("underlying"),
+                "people": {
+                    "natural": _build_trend_person(rows, "natural"),
+                    "legal": _build_trend_person(rows, "legal"),
+                },
+            }
+        )
+    return {
+        "items": daily_items,
+        "total": len(daily_items),
+        "summary": {
+            "natural": _build_trend_summary(daily_items, "natural"),
+            "legal": _build_trend_summary(daily_items, "legal"),
+        },
+    }
+
+
+def _build_trend_person(rows: List[Dict[str, Any]], prefix: str) -> Dict[str, Any]:
+    call_rows = [row for row in rows if row.get("option_type") == "call"]
+    put_rows = [row for row in rows if row.get("option_type") == "put"]
+    itm_rows = [row for row in rows if row.get("moneyness") == "ITM"]
+    otm_rows = [row for row in rows if row.get("moneyness") == "OTM"]
+
+    call_buy = _sum_rows(call_rows, f"{prefix}_buy_volume")
+    call_sell = _sum_rows(call_rows, f"{prefix}_sell_volume")
+    put_buy = _sum_rows(put_rows, f"{prefix}_buy_volume")
+    put_sell = _sum_rows(put_rows, f"{prefix}_sell_volume")
+    itm_volume = _sum_participant_volume(itm_rows, prefix)
+    otm_volume = _sum_participant_volume(otm_rows, prefix)
+    call_volume = _sum_participant_volume(call_rows, prefix)
+    put_volume = _sum_participant_volume(put_rows, prefix)
+
+    has_current_oi = any(row.get("buy_open_positions") is not None for row in rows)
+    has_yesterday_oi = any(row.get("yesterday_open_positions") is not None for row in rows)
+    current_oi = _sum_rows(rows, "buy_open_positions") if has_current_oi else None
+    yesterday_oi = _sum_rows(rows, "yesterday_open_positions") if has_yesterday_oi else None
+    oi_change = (current_oi or 0) - (yesterday_oi or 0) if has_current_oi or has_yesterday_oi else None
+
+    call_signal = 1 if call_buy > call_sell else -1 if call_sell > call_buy else 0
+    put_signal = 1 if put_sell > put_buy else -1 if put_buy > put_sell else 0
+    moneyness_score = 2 if otm_volume > itm_volume else 1 if itm_volume > otm_volume else 0
+    call_put_score = 1 if call_volume > put_volume else -1 if put_volume > call_volume else 0
+    oi_score = 1 if oi_change is not None and oi_change > 0 else -1 if oi_change is not None and oi_change < 0 else 0
+    score = call_signal + put_signal + moneyness_score + call_put_score + oi_score
+
+    return {
+        "score": score,
+        "label": _trend_day_label(score),
+        "class_name": _trend_day_class(score),
+        "call_buy": call_buy,
+        "call_sell": call_sell,
+        "put_buy": put_buy,
+        "put_sell": put_sell,
+        "itm_volume": itm_volume,
+        "otm_volume": otm_volume,
+        "call_volume": call_volume,
+        "put_volume": put_volume,
+        "call_put_ratio": None if put_volume == 0 else call_volume / put_volume,
+        "open_interest": current_oi,
+        "yesterday_open_interest": yesterday_oi,
+        "open_interest_change": oi_change,
+        "has_open_interest": oi_change is not None,
+    }
+
+
+def _build_trend_summary(daily_items: List[Dict[str, Any]], person: str) -> Dict[str, Any]:
+    scores = [
+        item["people"][person]["score"]
+        for item in daily_items
+        if item.get("people", {}).get(person)
+    ]
+    if not scores:
+        return {"label": "داده کافی نیست", "class_name": "neutral", "average_score": None}
+    recent = scores[-3:] if len(scores) >= 3 else scores
+    previous = scores[:-3] if len(scores) > 3 else scores[:-1]
+    recent_avg = sum(recent) / len(recent)
+    previous_avg = sum(previous) / len(previous) if previous else recent_avg
+    delta = recent_avg - previous_avg
+    if recent_avg >= 3 and delta >= 0.5:
+        label = "روند صعودی تقویت‌شونده"
+        class_name = "bullish"
+    elif recent_avg >= 2:
+        label = "روند صعودی اما کم‌شتاب"
+        class_name = "cautious"
+    elif recent_avg <= -1:
+        label = "روند ضعیف / احتیاطی"
+        class_name = "weak"
+    elif delta >= 0.75:
+        label = "روند رو به بهبود"
+        class_name = "cautious"
+    else:
+        label = "روند خنثی"
+        class_name = "neutral"
+    return {
+        "label": label,
+        "class_name": class_name,
+        "average_score": recent_avg,
+        "previous_average_score": previous_avg,
+        "score_change": delta,
+    }
+
+
+def _sum_participant_volume(rows: List[Dict[str, Any]], prefix: str) -> float:
+    return _sum_rows(rows, f"{prefix}_buy_volume") + _sum_rows(rows, f"{prefix}_sell_volume")
+
+
+def _sum_rows(rows: List[Dict[str, Any]], key: str) -> float:
+    return sum(_numeric_value(row.get(key)) for row in rows)
+
+
+def _numeric_value(value: Any) -> float:
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _trend_day_label(score: int) -> str:
+    if score >= 4:
+        return "صعودی قوی"
+    if score >= 2:
+        return "صعودی محتاط"
+    if score <= -2:
+        return "ضعیف"
+    return "خنثی"
+
+
+def _trend_day_class(score: int) -> str:
+    if score >= 4:
+        return "bullish"
+    if score >= 2:
+        return "cautious"
+    if score <= -2:
+        return "weak"
+    return "neutral"

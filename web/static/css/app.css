@@ -116,6 +116,30 @@ body {
   border-radius: var(--radius-sm);
 }
 
+.date-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 36px;
+  padding: 0.28rem 0.55rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.date-filter input {
+  min-width: 124px;
+  color: var(--text);
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.26rem 0.45rem;
+  font: inherit;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -622,6 +646,144 @@ body {
 .analysis-step-label.analysis-step-label-cautious {
   color: var(--amber);
   background: rgba(251, 191, 36, 0.12);
+}
+
+.trend-analysis {
+  overflow: hidden;
+}
+
+.trend-loading {
+  padding: 0.85rem 1rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.trend-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.75rem 0.75rem 0;
+}
+
+.trend-summary-card {
+  min-width: 0;
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.trend-summary-card span,
+.trend-summary-card strong,
+.trend-summary-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-summary-card strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.trend-summary-card small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.trend-bullish {
+  border-color: rgba(52, 211, 153, 0.25);
+  background: var(--green-bg);
+}
+
+.trend-cautious {
+  border-color: rgba(251, 191, 36, 0.24);
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.trend-weak {
+  border-color: rgba(248, 113, 113, 0.24);
+  background: var(--red-bg);
+}
+
+.trend-tables {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.trend-person {
+  min-width: 0;
+}
+
+.trend-person-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.82rem;
+}
+
+.trend-person-title strong {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.trend-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.trend-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+
+.trend-table th,
+.trend-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.trend-table th {
+  color: var(--text-muted);
+  background: rgba(15, 23, 42, 0.36);
+  font-weight: 700;
+}
+
+.trend-table tr:last-child td {
+  border-bottom: none;
+}
+
+.trend-badge {
+  display: inline-flex;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.1);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.trend-badge.trend-bullish {
+  color: var(--green);
+}
+
+.trend-badge.trend-cautious {
+  color: var(--amber);
+}
+
+.trend-badge.trend-weak {
+  color: var(--red);
 }
 
 .analysis-step-metrics {
