@@ -593,6 +593,37 @@ body {
   background: var(--red-bg);
 }
 
+.analysis-step-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.analysis-step-labels .analysis-step-label {
+  margin-bottom: 0;
+}
+
+.analysis-step-label.analysis-step-label-bullish {
+  color: var(--green);
+  background: var(--green-bg);
+}
+
+.analysis-step-label.analysis-step-label-weak {
+  color: var(--red);
+  background: var(--red-bg);
+}
+
+.analysis-step-label.analysis-step-label-neutral {
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.analysis-step-label.analysis-step-label-cautious {
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.12);
+}
+
 .analysis-step-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

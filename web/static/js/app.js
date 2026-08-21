@@ -599,9 +599,13 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
   const yesterdayOi = sumRows(rows, (row) => row.yesterday_open_positions);
   const oiChange = currentOi - yesterdayOi;
 
-  const callBuyDominates = callBuy > putBuy;
-  const putSellDominates = putSell > callSell;
-  const step1Bullish = callBuyDominates || putSellDominates;
+  const callBuyDominates = callBuy > callSell;
+  const callSellDominates = callSell > callBuy;
+  const putSellDominates = putSell > putBuy;
+  const putBuyDominates = putBuy > putSell;
+  const step1Score =
+    (callBuyDominates ? 1 : callSellDominates ? -1 : 0) +
+    (putSellDominates ? 1 : putBuyDominates ? -1 : 0);
   const step2Strong = otmVolume > itmVolume;
   const step2Cautious = itmVolume > otmVolume;
   const step3Bullish = callVolume > putVolume;
@@ -609,8 +613,7 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
   const step4Weak = oiChange < 0;
 
   const score =
-    (callBuyDominates ? 1 : 0) +
-    (putSellDominates ? 1 : 0) +
+    step1Score +
     (step2Strong ? 2 : step2Cautious ? 1 : 0) +
     (step3Bullish ? 1 : callVolume < putVolume ? -1 : 0) +
     (step4Confirm ? 1 : step4Weak ? -1 : 0);
@@ -636,20 +639,40 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
     score,
     steps: [
       {
+        kicker: "جریان سفارش",
         title: "حجم خرید و فروش",
         label: [
-          callBuyDominates ? "خرید Call غالب" : null,
-          putSellDominates ? "فروش Put غالب" : null,
+          callBuyDominates
+            ? "Call: خرید بیشتر؛ صعودی"
+            : callSellDominates
+              ? "Call: فروش بیشتر؛ ضعیف"
+              : "Call: متعادل",
+          putSellDominates
+            ? "Put: فروش بیشتر؛ صعودی"
+            : putBuyDominates
+              ? "Put: خرید بیشتر؛ ضعیف"
+              : "Put: متعادل",
         ].filter(Boolean).join("، ") || "بدون برتری روشن",
-        className: step1Bullish ? "bullish" : "neutral",
+        className: step1Score > 0 ? "bullish" : step1Score < 0 ? "weak" : "neutral",
+        signals: [
+          {
+            label: callBuyDominates ? "Call صعودی" : callSellDominates ? "Call ضعیف" : "Call متعادل",
+            className: callBuyDominates ? "bullish" : callSellDominates ? "weak" : "neutral",
+          },
+          {
+            label: putSellDominates ? "Put صعودی" : putBuyDominates ? "Put ضعیف" : "Put متعادل",
+            className: putSellDominates ? "bullish" : putBuyDominates ? "weak" : "neutral",
+          },
+        ],
         metrics: [
           ["Call خرید", callBuy],
-          ["Put خرید", putBuy],
           ["Call فروش", callSell],
+          ["Put خرید", putBuy],
           ["Put فروش", putSell],
         ],
       },
       {
+        kicker: "محدوده قیمت اعمال",
         title: "ITM و OTM",
         label: step2Strong ? "OTM غالب؛ مثبت‌تر" : step2Cautious ? "ITM غالب؛ مثبت محتاط" : "متعادل",
         className: step2Strong ? "bullish" : step2Cautious ? "cautious" : "neutral",
@@ -659,6 +682,7 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
         ],
       },
       {
+        kicker: "ترکیب قراردادها",
         title: "نسبت Call به Put",
         label: step3Bullish ? "Call غالب" : callVolume < putVolume ? "Put غالب" : "متعادل",
         className: step3Bullish ? "bullish" : callVolume < putVolume ? "weak" : "neutral",
@@ -669,6 +693,7 @@ function buildFourStepConclusion(rows, prefix, personLabel, personClass) {
         ],
       },
       {
+        kicker: "تأیید موقعیت",
         title: "Open Interest",
         label: step4Confirm ? "تأییدکننده" : step4Weak ? "تضعیف‌کننده" : "بدون تغییر",
         className: step4Confirm ? "bullish" : step4Weak ? "weak" : "neutral",
@@ -705,18 +730,29 @@ function renderFourStepConclusion(rows) {
                 <div class="analysis-step-grid">
                   ${conclusion.steps
                     .map(
-                      (step, index) => `
-                        <article class="analysis-step analysis-step-${step.className}">
-                          <div class="analysis-step-title">
-                            <span>گام ${fmtNum(index + 1)}</span>
-                            <strong>${step.title}</strong>
-                          </div>
-                          <div class="analysis-step-label">${step.label}</div>
-                          <div class="analysis-step-metrics">
-                            ${step.metrics
-                              .map(([label, value]) => `<div><span>${label}</span><strong>${typeof value === "number" ? fmtNum(value) : value}</strong></div>`)
-                              .join("")}
-                          </div>
+	                      (step, index) => `
+	                        <article class="analysis-step analysis-step-${step.className}">
+	                          <div class="analysis-step-title">
+	                            <span>${escapeHtml(step.kicker)}</span>
+	                            <strong>${escapeHtml(step.title)}</strong>
+	                          </div>
+	                          ${step.signals
+                              ? `<div class="analysis-step-labels">
+                                  ${step.signals
+                                    .map(
+                                      (signal) => `
+                                        <span class="analysis-step-label analysis-step-label-${signal.className}">
+                                          ${escapeHtml(signal.label)}
+                                        </span>`
+                                    )
+                                    .join("")}
+                                </div>`
+                              : `<div class="analysis-step-label">${escapeHtml(step.label)}</div>`}
+	                          <div class="analysis-step-metrics">
+	                            ${step.metrics
+	                              .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(typeof value === "number" ? fmtNum(value) : value)}</strong></div>`)
+	                              .join("")}
+	                          </div>
                         </article>`
                     )
                     .join("")}
